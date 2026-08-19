@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GARGANTUA — Schwarzschild Black Hole Raytracer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    color: #e0e0e0;
+    font-family: 'Courier New', Courier, monospace;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+  #canvas-container {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #hud {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 10;
+    pointer-events: none;
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .hud-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .hud-title {
+    text-transform: uppercase;
+    letter-spacing: 3px;
+  }
+  .hud-title h1 {
+    font-size: 14px;
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .hud-title .subtitle {
+    font-size: 11px;
+    color: #888;
+    letter-spacing: 2px;
+  }
+  .hud-mass {
+    text-align: right;
+    font-size: 11px;
+    color: #888;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .hud-mass span { color: #fff; font-size: 13px; }
+
+  .hud-center {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  .hud-center.visible { opacity: 1; }
+  .hud-center .big { font-size: 48px; color: #fff; letter-spacing: 8px; }
+  .hud-center .small { font-size: 11px; color: #888; letter-spacing: 3px; margin-top: 8px; }
+
+  .hud-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .telemetry {
+    font-size: 11px;
+    line-height: 1.8;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .telemetry .val { color: #fff; margin-left: 8px; }
+  .telemetry-right {
+    text-align: right;
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    line-height: 1.6;
+  }
+
+  #controls {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    gap: 12px;
+    pointer-events: auto;
+  }
+  .btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #888;
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    pointer-events: auto;
+  }
+  .btn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .btn.active { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.4); }
+
+  #loading {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #000;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 1s;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  #loading h2 {
+    font-size: 14px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+  #loading .bar {
+    width: 200px;
+    height: 1px;
+    background: #222;
+    position: relative;
+  }
+  #loading .bar-fill {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    background: #fff;
+    width: 0%;
+    transition: width 0.3s;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <h2>Initializing Raytracer</h2>
+  <div class="bar"><div class="bar-fill" id="loadBar"></div></div>
+</div>
+
+<div id="canvas-container"><canvas id="glcanvas"></canvas></div>
+
+<div id="hud">
+  <div class="hud-top">
+    <div class="hud-title">
+      <h1>GARGANTUA</h1>
+      <div class="subtitle">Schwarzschild Metric // Null-Geodesic Raytracing</div>
+    </div>
+    <div class="hud-mass">
+      Supermassive Black Hole<br>
+      <span>1.0 × 10⁸ M☉</span>
+    </div>
+  </div>
+
+  <div class="hud-center" id="cineMsg">
+    <div class="big">CINEMATIC</div>
+    <div class="small">SEQUENCE ACTIVE</div>
+  </div>
+
+  <div class="hud-bottom">
+    <div class="telemetry">
+      <div>Mission Elapsed<span class="val" id="te-mission">00:00:00</span></div>
+      <div>Observer Distance<span class="val" id="te-dist">—</span></div>
+      <div>Disk Inclination<span class="val" id="te-inc">—</span></div>
+      <div>Geodesic Steps<span class="val" id="te-steps">—</span></div>
+      <div>Render Profile<span class="val" id="te-prof">—</span></div>
+      <div>Frame Rate<span class="val" id="te-fps">—</span></div>
+    </div>
+    <div class="telemetry-right">
+      <div>1-4 Views</div>
+      <div>C Cine · R Orbit · P Params</div>
+      <div>M Sound · H HUD</div>
+    </div>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="btn" id="btn-cine">Cine</button>
+  <button class="btn" id="btn-orbit">Orbit</button>
+  <button class="btn" id="btn-params">Params</button>
+  <button class="btn" id="btn-hud">HUD</button>
+  <button class="btn" id="btn-reset">Reset</button>
+</div>
+
+<script>
+// ============================================================
+// GARGANTUA — Schwarzschild Black Hole Raytracer (WebGL)
+// ============================================================
+
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false });
+
+if (!gl) {
+  alert('WebGL not supported');
+  throw new Error('WebGL not supported');
+}
+
+// --- Shader Sources ---
+const VERT = `
+attribute vec2 a_pos;
+void main() {
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}
+`;
+
+const FRAG = `
+precision highp float;
+
+uniform vec2 u_res;
+uniform float u_time;
+uniform float u_camDist;
+uniform float u_camTheta;
+uniform float u_camPhi;
+uniform float u_diskInner;
+uniform float u_diskOuter;
+uniform float u_diskTilt;
+uniform float u_exposure;
+uniform float u_quality;
+
+#define PI 3.14159265359
+#define TWO_PI 6.28318530718
+#define M 1.0
+#define RS 2.0
+
+// Hash functions
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float hash3(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// Star field
+vec3 starField(vec3 dir) {
+  vec3 col = vec3(0.0);
+  float h = hash3(floor(dir * 300.0));
+  if (h > 0.997) {
+    float brightness = pow(hash3(floor(dir * 300.0) + vec3(1.0)), 2.0);
+    vec3 starColor = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.9, 0.7), hash3(floor(dir * 300.0) + vec3(2.0)));
+    col += starColor * brightness * 2.0;
+  }
+  // Distant nebula glow
+  float neb = sin(dir.x * 3.0 + dir.y * 5.0) * sin(dir.z * 2.0 + dir.x * 4.0);
+  neb = smoothstep(0.6, 1.0, neb);
+  col += vec3(0.05, 0.02, 0.08) * neb * 0.3;
+  return col;
+}
+
+// Accretion disk temperature color (blackbody approximation)
+vec3 blackbody(float t) {
+  // t in [0,1] mapped to temperature
+  t = clamp(t, 0.0, 1.0);
+  vec3 c;
+  c.r = 1.0;
+  c.g = smoothstep(0.0, 0.5, t);
+  c.b = smoothstep(0.3, 0.8, t);
+  // Hotter = whiter/brighter
+  float bright = mix(0.3, 3.0, t);
+  return c * bright;
+}
+
+// Rotate vector around axis
+vec3 rotate(vec3 v, vec3 axis, float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+  float oc = 1.0 - c;
+  return vec3(
+    v.x * (oc * axis.x * axis.x + c) + v.y * (oc * axis.x * axis.y - s * axis.z) + v.z * (oc * axis.x * axis.z + s * axis.y),
+    v.x * (oc * axis.x * axis.y + s * axis.z) + v.y * (oc * axis.y * axis.y + c) + v.z * (oc * axis.y * axis.z - s * axis.x),
+    v.x * (oc * axis.x * axis.z - s * axis.y) + v.y * (oc * axis.y * axis.z + s * axis.x) + v.z * (oc * axis.z * axis.z + c)
+  );
+}
+
+// Schwarzschild raytrace
+// Returns: xyz = color, w = hit type (0=background, 1=disk, 2=horizon)
+vec4 traceRay(vec3 ro, vec3 rd) {
+  float h = RS * 1.001; // event horizon with small epsilon
+  float dt = 0.15 * u_quality;
+  float maxT = 80.0;
+
+  vec3 p = ro;
+  vec3 v = rd;
+
+  // Disk parameters
+  float diskIn = u_diskInner;
+  float diskOut = u_diskOuter;
+  vec3 diskNormal = rotate(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), u_diskTilt);
+
+  float t = 0.0;
+  vec3 col = vec3(0.0);
+  float hitType = 0.0;
+
+  for (int i = 0; i < 256; i++) {
+    if (t > maxT) break;
+
+    float r = length(p);
+    float r2 = r * r;
+    float r3 = r2 * r;
+
+    // Check horizon
+    if (r < h) {
+      hitType = 2.0;
+      col = vec3(0.0);
+      break;
+    }
+
+    // Check disk intersection (thin disk approximation)
+    float diskH = 0.08;
+    float planeDist = dot(p, diskNormal);
+    float nextPlaneDist = dot(p + v * dt, diskNormal);
+
+    if (sign(planeDist) != sign(nextPlaneDist) || abs(planeDist) < diskH) {
+      // Refine intersection
+      float tDisk = -planeDist / dot(v, diskNormal);
+      if (tDisk > 0.0 && tDisk < dt * 2.0) {
+        vec3 pDisk = p + v * tDisk;
+        float rDisk = length(pDisk);
+        if (rDisk > diskIn && rDisk < diskOut) {
+          hitType = 1.0;
+          // Temperature profile ~ r^(-3/4)
+          float temp = pow((diskOut - diskIn) / (rDisk - diskIn + 0.1), 0.75);
+          temp = clamp(temp, 0.0, 1.0);
+          // Doppler beaming (simplified)
+          vec3 diskVel = normalize(cross(diskNormal, pDisk));
+          float doppler = 1.0 + dot(v, diskVel) * 0.3;
+          temp *= doppler;
+          col = blackbody(temp);
+          // Gravitational redshift
+          float redshift = sqrt(1.0 - RS / rDisk);
+          col *= redshift;
+          break;
+        }
+      }
+    }
+
+    // Gravitational acceleration (Newtonian-like approximation for visual effect)
+    // More accurate: use proper geodesic equation
+    float f = -1.5 * RS / r2;
+    vec3 acc = normalize(p) * f;
+
+    // Relativistic correction factor
+    float factor = 1.0 / (1.0 - RS / r);
+    acc *= factor;
+
+    // Integrate
+    v += acc * dt;
+    v = normalize(v); // keep light-like
+    p += v * dt;
+    t += dt;
+  }
+
+  if (hitType == 0.0) {
+    // Background / stars
+    col = starField(normalize(v));
+    // Gravitational lensing brightening near black hole
+    float finalR = length(p);
+    if (finalR < 8.0) {
+      float lens = smoothstep(8.0, 3.0, finalR);
+      col *= 1.0 + lens * 0.5;
+    }
+  }
+
+  return vec4(col, hitType);
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+
+  // Camera setup
+  float dist = u_camDist;
+  float theta = u_camTheta;
+  float phi = u_camPhi;
+
+  vec3 ro = vec3(
+    dist * sin(theta) * cos(phi),
+    dist * cos(theta),
+    dist * sin(theta) * sin(phi)
+  );
+
+  vec3 camFwd = -normalize(ro);
+  vec3 camRight = normalize(cross(camFwd, vec3(0.0, 1.0, 0.0)));
+  vec3 camUp = cross(camRight, camFwd);
+
+  float fov = 1.2;
+  vec3 rd = normalize(camFwd + uv.x * camRight * fov + uv.y * camUp * fov);
+
+  // Antialiasing / dither
+  vec2 dither = vec2(hash(uv + u_time), hash(uv + u_time + 1.0)) - 0.5;
+  uv += dither * 0.001;
+
+  vec4 result = traceRay(ro, rd);
+  vec3 col = result.xyz;
+
+  // Tone mapping
+  col = col / (col + vec3(1.0)) * u_exposure;
+
+  // Vignette
+  float vig = 1.0 - dot(uv, uv) * 0.3;
+  col *= vig;
+
+  // Gamma
+  col = pow(col, vec3(0.4545));
+
+  // Film grain
+  col += (hash(gl_FragCoord.xy + fract(u_time * 100.0)) - 0.5) * 0.03;
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// --- Compile Shader ---
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    throw new Error('Shader compile error');
+  }
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+  throw new Error('Link error');
+}
+gl.useProgram(prog);
+
+// --- Fullscreen Quad ---
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+// --- Uniforms ---
+const uRes = gl.getUniformLocation(prog, 'u_res');
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uCamDist = gl.getUniformLocation(prog, 'u_camDist');
+const uCamTheta = gl.getUniformLocation(prog, 'u_camTheta');
+const uCamPhi = gl.getUniformLocation(prog, 'u_camPhi');
+const uDiskInner = gl.getUniformLocation(prog, 'u_diskInner');
+const uDiskOuter = gl.getUniformLocation(prog, 'u_diskOuter');
+const uDiskTilt = gl.getUniformLocation(prog, 'u_diskTilt');
+const uExposure = gl.getUniformLocation(prog, 'u_exposure');
+const uQuality = gl.getUniformLocation(prog, 'u_quality');
+
+// --- State ---
+let state = {
+  camDist: 18.0,
+  camTheta: 1.35,
+  camPhi: 0.0,
+  diskInner: 6.0,
+  diskOuter: 18.0,
+  diskTilt: 0.3,
+  exposure: 1.8,
+  quality: 1.0,
+  orbit: false,
+  cine: false,
+  hud: true,
+  startTime: Date.now(),
+  lastFrame: 0,
+  frameCount: 0,
+  fps: 0,
+  mouseDown: false,
+  mouseX: 0,
+  mouseY: 0,
+  cinePhase: 0,
+};
+
+// --- Resize ---
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Mouse / Touch Controls ---
+canvas.addEventListener('mousedown', e => { state.mouseDown = true; state.mouseX = e.clientX; state.mouseY = e.clientY; });
+window.addEventListener('mouseup', () => state.mouseDown = false);
+window.addEventListener('mousemove', e => {
+  if (!state.mouseDown) return;
+  const dx = e.clientX - state.mouseX;
+  const dy = e.clientY - state.mouseY;
+  state.mouseX = e.clientX;
+  state.mouseY = e.clientY;
+  state.camPhi -= dx * 0.008;
+  state.camTheta += dy * 0.008;
+  state.camTheta = clamp(state.camTheta, 0.1, PI - 0.1);
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.camDist *= 1.0 + e.deltaY * 0.001;
+  state.camDist = clamp(state.camDist, 5.0, 60.0);
+}, { passive: false });
+
+// Touch
+let touchId = null;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    touchId = e.touches[0].identifier;
+    state.mouseDown = true;
+    state.mouseX = e.touches[0].clientX;
+    state.mouseY = e.touches[0].clientY;
+  }
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (let t of e.changedTouches) {
+    if (t.identifier === touchId) {
+      const dx = t.clientX - state.mouseX;
+      const dy = t.clientY - state.mouseY;
+      state.mouseX = t.clientX;
+      state.mouseY = t.clientY;
+      state.camPhi -= dx * 0.01;
+      state.camTheta += dy * 0.01;
+      state.camTheta = clamp(state.camTheta, 0.1, PI - 0.1);
+    }
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', () => { state.mouseDown = false; touchId = null; });
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+const PI = Math.PI;
+
+// --- Buttons ---
+document.getElementById('btn-cine').addEventListener('click', () => {
+  state.cine = !state.cine;
+  document.getElementById('btn-cine').classList.toggle('active', state.cine);
+  document.getElementById('cineMsg').classList.toggle('visible', state.cine);
+});
+document.getElementById('btn-orbit').addEventListener('click', () => {
+  state.orbit = !state.orbit;
+  document.getElementById('btn-orbit').classList.toggle('active', state.orbit);
+});
+document.getElementById('btn-hud').addEventListener('click', () => {
+  state.hud = !state.hud;
+  document.getElementById('hud').style.opacity = state.hud ? '1' : '0';
+  document.getElementById('btn-hud').classList.toggle('active', state.hud);
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  state.camDist = 18.0;
+  state.camTheta = 1.35;
+  state.camPhi = 0.0;
+  state.orbit = false;
+  state.cine = false;
+  document.getElementById('btn-orbit').classList.remove('active');
+  document.getElementById('btn-cine').classList.remove('active');
+  document.getElementById('cineMsg').classList.remove('visible');
+});
+
+// --- Formatting ---
+function fmtTime(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  return pad(h) + ':' + pad(m % 60) + ':' + pad(s % 60);
+}
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+// --- Loading Animation ---
+let loadProgress = 0;
+const loadBar = document.getElementById('loadBar');
+const loadScreen = document.getElementById('loading');
+const loadInterval = setInterval(() => {
+  loadProgress += 5 + Math.random() * 10;
+  if (loadProgress >= 100) {
+    loadProgress = 100;
+    loadBar.style.width = '100%';
+    clearInterval(loadInterval);
+    setTimeout(() => loadScreen.classList.add('hidden'), 400);
+  } else {
+    loadBar.style.width = loadProgress + '%';
+  }
+}, 80);
+
+// --- Render Loop ---
+function render() {
+  const now = Date.now();
+  const elapsed = (now - state.startTime) / 1000;
+
+  // FPS
+  state.frameCount++;
+  if (now - state.lastFrame >= 1000) {
+    state.fps = state.frameCount;
+    state.frameCount = 0;
+    state.lastFrame = now;
+  }
+
+  // Auto-orbit
+  if (state.orbit) {
+    state.camPhi += 0.003;
+  }
+
+  // Cinematic sequence
+  if (state.cine) {
+    state.cinePhase += 0.002;
+    state.camDist = 15.0 + Math.sin(state.cinePhase) * 8.0;
+    state.camTheta = 1.2 + Math.sin(state.cinePhase * 0.7) * 0.4;
+    state.diskTilt = 0.2 + Math.sin(state.cinePhase * 0.3) * 0.3;
+  }
+
+  // Update uniforms
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uTime, elapsed);
+  gl.uniform1f(uCamDist, state.camDist);
+  gl.uniform1f(uCamTheta, state.camTheta);
+  gl.uniform1f(uCamPhi, state.camPhi);
+  gl.uniform1f(uDiskInner, state.diskInner);
+  gl.uniform1f(uDiskOuter, state.diskOuter);
+  gl.uniform1f(uDiskTilt, state.diskTilt);
+  gl.uniform1f(uExposure, state.exposure);
+  gl.uniform1f(uQuality, state.quality);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Update HUD
+  document.getElementById('te-mission').textContent = fmtTime(now - state.startTime);
+  document.getElementById('te-dist').textContent = state.camDist.toFixed(1) + ' RS';
+  document.getElementById('te-inc').textContent = (state.diskTilt * 180 / PI).toFixed(1) + '°';
+  document.getElementById('te-steps').textContent = '256';
+  document.getElementById('te-prof').textContent = state.quality >= 1.0 ? 'High' : 'Med';
+  document.getElementById('te-fps').textContent = state.fps + ' FPS';
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
